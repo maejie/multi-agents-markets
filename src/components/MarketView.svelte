@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Application, Graphics, Text, TextStyle, Container } from 'pixi.js';
-  import type { SimState } from '../simulation/types';
+  import type { Ticker } from 'pixi.js';
+  import type { SimState, SimEvent } from '../simulation/types';
 
   export let state: SimState | null = null;
 
@@ -10,6 +11,98 @@
   let app: Application;
   let worldContainer: Container;
   let resizeObserver: ResizeObserver;
+
+  // ── Animation system ──────────────────────────────────
+  let animationLayer: Container | null = null;
+  let animatedEventCount = 0;
+
+  interface LayoutInfo {
+    oemCenter: { x: number; y: number };
+    recyclerCenter: { x: number; y: number };
+    vehicleMarketCenter: { x: number; y: number };
+    agentPanelCenter: { x: number; y: number };
+    agentPositions: Map<string, { x: number; y: number }>;
+  }
+  let layoutInfo: LayoutInfo | null = null;
+
+  interface Particle {
+    gfx: Graphics;
+    pathPoints: Array<{ x: number; y: number }>;
+    elapsed: number;
+    totalDuration: number;
+  }
+  const MAX_PARTICLES = 30;
+  const PARTICLE_TOTAL_MS = 1200;
+  const FADE_START = 0.85;   // particle starts fading at 85% of animation
+  const FADE_DURATION = 0.15; // fade lasts the remaining 15%
+  let particles: Particle[] = [];
+
+  function onTick(ticker: Ticker) {
+    const dt = ticker.deltaMS;
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.elapsed += dt;
+      const t = Math.min(p.elapsed / p.totalDuration, 1);
+
+      const totalSegments = p.pathPoints.length - 1;
+      const globalT = t * totalSegments;
+      const segIdx = Math.min(Math.floor(globalT), totalSegments - 1);
+      const segT = globalT - segIdx;
+      const from = p.pathPoints[segIdx];
+      const to = p.pathPoints[segIdx + 1];
+      const x = from.x + (to.x - from.x) * segT;
+      const y = from.y + (to.y - from.y) * segT;
+
+      const alpha = t > FADE_START ? (1 - t) / FADE_DURATION : 1;
+
+      p.gfx.clear();
+      // Outer glow
+      p.gfx.circle(x, y, 11);
+      p.gfx.fill({ color: 0x1d4ed8, alpha: 0.18 * alpha });
+      // Mid glow
+      p.gfx.circle(x, y, 7);
+      p.gfx.fill({ color: 0x3b82f6, alpha: 0.45 * alpha });
+      // Inner ring
+      p.gfx.circle(x, y, 4);
+      p.gfx.fill({ color: 0x93c5fd, alpha: 0.8 * alpha });
+      // Bright core
+      p.gfx.circle(x, y, 2);
+      p.gfx.fill({ color: 0xffffff, alpha: alpha });
+
+      if (t >= 1) {
+        animationLayer?.removeChild(p.gfx);
+        p.gfx.destroy();
+        particles.splice(i, 1);
+      }
+    }
+  }
+
+  function spawnParticle(pathPoints: Array<{ x: number; y: number }>) {
+    if (!animationLayer || pathPoints.length < 2 || particles.length >= MAX_PARTICLES) return;
+    const gfx = new Graphics();
+    animationLayer.addChild(gfx);
+    particles.push({ gfx, pathPoints, elapsed: 0, totalDuration: PARTICLE_TOTAL_MS });
+  }
+
+  function spawnParticlesForEvents(events: SimEvent[]) {
+    if (!layoutInfo) return;
+    const { oemCenter, recyclerCenter, vehicleMarketCenter, agentPanelCenter, agentPositions } = layoutInfo;
+
+    for (const ev of events) {
+      if (ev.eventType === 'NEW_CAR_DELIVERED') {
+        const agentPos = ev.agentId ? (agentPositions.get(ev.agentId) ?? agentPanelCenter) : agentPanelCenter;
+        spawnParticle([oemCenter, vehicleMarketCenter, agentPos]);
+      } else if (ev.eventType === 'USED_TRADE_EXECUTED') {
+        const sellerPos = ev.sellerId ? (agentPositions.get(ev.sellerId) ?? agentPanelCenter) : agentPanelCenter;
+        const buyerPos = ev.buyerId ? (agentPositions.get(ev.buyerId) ?? agentPanelCenter) : agentPanelCenter;
+        spawnParticle([sellerPos, vehicleMarketCenter, buyerPos]);
+      } else if (ev.eventType === 'VEHICLE_DISPOSED_EOL' || ev.eventType === 'OWNER_EXIT_DISPOSAL') {
+        const agentPos = ev.agentId ? (agentPositions.get(ev.agentId) ?? agentPanelCenter) : agentPanelCenter;
+        spawnParticle([agentPos, vehicleMarketCenter, recyclerCenter]);
+      }
+    }
+  }
+  // ─────────────────────────────────────────────────────
 
   const CELL = 28;
   const PAD = 6;
@@ -57,6 +150,8 @@
     window.addEventListener('mousemove', onPanMove);
     window.addEventListener('mouseup', onPanEnd);
 
+    app.ticker.add(onTick);
+
     drawGrid();
     resetView();
   });
@@ -67,6 +162,7 @@
     hostEl?.removeEventListener('mousedown', onPanStart);
     window.removeEventListener('mousemove', onPanMove);
     window.removeEventListener('mouseup', onPanEnd);
+    app?.ticker.remove(onTick);
     app?.destroy(false);
   });
 
@@ -122,6 +218,10 @@
   }
 
   function drawGrid() {
+    // Detach animation layer before clearing so particles persist
+    if (animationLayer && animationLayer.parent) {
+      animationLayer.parent.removeChild(animationLayer);
+    }
     worldContainer.removeChildren();
     if (!state) return;
 
@@ -171,6 +271,8 @@
     recyclerPanel.stroke({ color: 0x233047, width: 2 });
     worldContainer.addChild(recyclerPanel);
 
+    // Build agent position map for animation
+    const agentPositions = new Map<string, { x: number; y: number }>();
     agents.forEach((agent, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
@@ -209,6 +311,8 @@
       g.x = x;
       g.y = y;
       worldContainer.addChild(g);
+
+      agentPositions.set(agent.id, { x: x + CELL / 2, y: y + CELL / 2 });
     });
 
     // Legend
@@ -256,6 +360,30 @@
     recyclerTitle.x = recyclerX + 14;
     recyclerTitle.y = vehiclePanelY + 12;
     worldContainer.addChild(recyclerTitle);
+
+    // Store layout for animation
+    layoutInfo = {
+      oemCenter: { x: SIDE_CONTAINER_WIDTH / 2, y: vehiclePanelY + SIDE_CONTAINER_HEIGHT / 2 },
+      recyclerCenter: { x: recyclerX + SIDE_CONTAINER_WIDTH / 2, y: vehiclePanelY + SIDE_CONTAINER_HEIGHT / 2 },
+      vehicleMarketCenter: { x: agentPanelX + panelW / 2, y: vehiclePanelY + VEHICLE_MARKET_HEIGHT / 2 },
+      agentPanelCenter: { x: agentPanelX + panelW / 2, y: agentPanelY + agentPanelH / 2 },
+      agentPositions,
+    };
+
+    // Spawn particles for events new since last draw
+    if (state.allEvents.length < animatedEventCount) {
+      // Simulation was reset
+      animatedEventCount = 0;
+    }
+    if (state.allEvents.length > animatedEventCount) {
+      const newEvents = state.allEvents.slice(animatedEventCount);
+      animatedEventCount = state.allEvents.length;
+      spawnParticlesForEvents(newEvents);
+    }
+
+    // Re-attach animation layer on top of grid
+    if (!animationLayer) animationLayer = new Container();
+    worldContainer.addChild(animationLayer);
 
     if (!hasUserAdjustedView) resetView();
   }

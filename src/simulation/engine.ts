@@ -351,6 +351,7 @@ function disposeVehicle(
   // Remove sell order if exists
   s.sellOrders = s.sellOrders.filter(o => o.vehicleId !== vehicleId);
 
+  const prevOwnerId = vehicle.ownerId ?? undefined;
   const prevOwner = vehicle.ownerId ? agentMap.get(vehicle.ownerId) : null;
   if (prevOwner) {
     prevOwner.vehicleId = null;
@@ -360,7 +361,7 @@ function disposeVehicle(
 
   vehicle.status = 'disposed';
   vehicle.ownerId = null;
-  emit({ eventType, vehicleId });
+  emit({ eventType, vehicleId, agentId: prevOwnerId });
 }
 
 function deepClone<T>(obj: T): T {
