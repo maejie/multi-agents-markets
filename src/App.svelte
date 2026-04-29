@@ -14,6 +14,8 @@
   import StatBar from './components/StatBar.svelte';
   import ParamsPanel from './components/ParamsPanel.svelte';
   import DraggableWindow from './components/DraggableWindow.svelte';
+  import MobileDrawer from './components/MobileDrawer.svelte';
+  import AccordionSection from './components/AccordionSection.svelte';
 
   let worker: Worker;
   let api: Remote<SimWorkerApi>;
@@ -53,6 +55,12 @@
   let eventsX = 1240;
   let eventsY = 16;
 
+  let isMobile = false;
+
+  function checkMobile() {
+    isMobile = window.innerWidth < 768;
+  }
+
   function bringToFront(name: 'control' | 'params' | 'metrics' | 'charts' | 'events') {
     zTop += 1;
     if (name === 'control') zControl = zTop;
@@ -67,6 +75,9 @@
     api = wrap<SimWorkerApi>(worker);
     simState = await api.init(activeParams);
 
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     eventsX = Math.max(16, vw - eventsW - 16);
@@ -76,6 +87,7 @@
   onDestroy(() => {
     stopSim();
     worker?.terminate();
+    window.removeEventListener('resize', checkMobile);
   });
 
   async function initSim() {
@@ -127,55 +139,101 @@
 
   <div class="title-badge">
     <div class="title">VLT Market Simulator</div>
-    <div class="subtitle">Full-screen Agent Map with movable windows</div>
+    {#if !isMobile}
+      <div class="subtitle">Full-screen Agent Map with movable windows</div>
+    {/if}
   </div>
 
-  <DraggableWindow title="操作ウィンドウ" x={controlX} y={controlY} width={controlW} height={controlH} zIndex={zControl} on:focus={() => bringToFront('control')}>
-    <div class="controls">
-      <button class="btn btn-green" on:click={startSim} disabled={running}>Play</button>
-      <button class="btn btn-red" on:click={stopSim} disabled={!running}>Pause</button>
-      <button class="btn btn-blue" on:click={stepOnce} disabled={running}>+1 Month</button>
-      <button class="btn btn-ghost" on:click={initSim} disabled={running}>Reset</button>
-    </div>
-
-    <button class="btn btn-apply" on:click={applySettings} disabled={running || !hasPendingChanges}>
-      Apply Settings
-    </button>
-
-    {#if hasPendingChanges}
-      <div class="pending-note">Changes pending. Apply Settings restarts with draft values.</div>
-    {/if}
-
-    <div class="speed-row">
-      <label for="speed-slider">Speed <span class="val">{speedMs}ms/step</span></label>
-      <input id="speed-slider" type="range" min="50" max="2000" step="50" bind:value={speedMs} />
-    </div>
-  </DraggableWindow>
-
-  <DraggableWindow title="パラメーター設定ウィンドウ" x={paramsX} y={paramsY} width={paramsW} height={paramsH} zIndex={zParams} on:focus={() => bringToFront('params')}>
-    <ParamsPanel params={draftParams} disabled={running} on:change={onParamsChange} />
-  </DraggableWindow>
-
-  <DraggableWindow title="概要メトリクスウィンドウ" x={metricsX} y={metricsY} width={metricsW} height={metricsH} zIndex={zMetrics} on:focus={() => bringToFront('metrics')}>
-    <StatBar current={currentMetrics} month={simState?.month ?? 0} />
-  </DraggableWindow>
-
-  <DraggableWindow title="チャートウィンドウ" x={chartsX} y={chartsY} width={chartsW} height={chartsH} zIndex={zCharts} on:focus={() => bringToFront('charts')}>
-    <div class="charts-row">
-      <div class="chart-col">
-        <div class="section-label">Price and Sales</div>
-        <PriceChart metrics={simState?.metrics ?? []} />
+  {#if !isMobile}
+    <DraggableWindow title="操作ウィンドウ" x={controlX} y={controlY} width={controlW} height={controlH} zIndex={zControl} on:focus={() => bringToFront('control')}>
+      <div class="controls">
+        <button class="btn btn-green" on:click={startSim} disabled={running}>Play</button>
+        <button class="btn btn-red" on:click={stopSim} disabled={!running}>Pause</button>
+        <button class="btn btn-blue" on:click={stepOnce} disabled={running}>+1 Month</button>
+        <button class="btn btn-ghost" on:click={initSim} disabled={running}>Reset</button>
       </div>
-      <div class="chart-col">
-        <div class="section-label">Vehicle Lifecycle</div>
-        <LifecycleChart metrics={simState?.metrics ?? []} />
-      </div>
-    </div>
-  </DraggableWindow>
 
-  <DraggableWindow title="イベントログウィンドウ" x={eventsX} y={eventsY} width={eventsW} height={eventsH} zIndex={zEvents} on:focus={() => bringToFront('events')}>
-    <EventLog events={allEvents} />
-  </DraggableWindow>
+      <button class="btn btn-apply" on:click={applySettings} disabled={running || !hasPendingChanges}>
+        Apply Settings
+      </button>
+
+      {#if hasPendingChanges}
+        <div class="pending-note">Changes pending. Apply Settings restarts with draft values.</div>
+      {/if}
+
+      <div class="speed-row">
+        <label for="speed-slider">Speed <span class="val">{speedMs}ms/step</span></label>
+        <input id="speed-slider" type="range" min="50" max="2000" step="50" bind:value={speedMs} />
+      </div>
+    </DraggableWindow>
+
+    <DraggableWindow title="パラメーター設定ウィンドウ" x={paramsX} y={paramsY} width={paramsW} height={paramsH} zIndex={zParams} on:focus={() => bringToFront('params')}>
+      <ParamsPanel params={draftParams} disabled={running} on:change={onParamsChange} />
+    </DraggableWindow>
+
+    <DraggableWindow title="概要メトリクスウィンドウ" x={metricsX} y={metricsY} width={metricsW} height={metricsH} zIndex={zMetrics} on:focus={() => bringToFront('metrics')}>
+      <StatBar current={currentMetrics} month={simState?.month ?? 0} />
+    </DraggableWindow>
+
+    <DraggableWindow title="チャートウィンドウ" x={chartsX} y={chartsY} width={chartsW} height={chartsH} zIndex={zCharts} on:focus={() => bringToFront('charts')}>
+      <div class="charts-row">
+        <div class="chart-col">
+          <div class="section-label">Price and Sales</div>
+          <PriceChart metrics={simState?.metrics ?? []} />
+        </div>
+        <div class="chart-col">
+          <div class="section-label">Vehicle Lifecycle</div>
+          <LifecycleChart metrics={simState?.metrics ?? []} />
+        </div>
+      </div>
+    </DraggableWindow>
+
+    <DraggableWindow title="イベントログウィンドウ" x={eventsX} y={eventsY} width={eventsW} height={eventsH} zIndex={zEvents} on:focus={() => bringToFront('events')}>
+      <EventLog events={allEvents} />
+    </DraggableWindow>
+  {:else}
+    <MobileDrawer>
+      <AccordionSection title="操作パネル" icon="🎮" open={true}>
+        <div class="controls">
+          <button class="btn btn-green" on:click={startSim} disabled={running}>Play</button>
+          <button class="btn btn-red" on:click={stopSim} disabled={!running}>Pause</button>
+          <button class="btn btn-blue" on:click={stepOnce} disabled={running}>+1 Month</button>
+          <button class="btn btn-ghost" on:click={initSim} disabled={running}>Reset</button>
+        </div>
+        <button class="btn btn-apply" on:click={applySettings} disabled={running || !hasPendingChanges}>
+          Apply Settings
+        </button>
+        {#if hasPendingChanges}
+          <div class="pending-note">Changes pending. Apply Settings restarts with draft values.</div>
+        {/if}
+        <div class="speed-row">
+          <label for="speed-slider-m">Speed <span class="val">{speedMs}ms/step</span></label>
+          <input id="speed-slider-m" type="range" min="50" max="2000" step="50" bind:value={speedMs} />
+        </div>
+      </AccordionSection>
+
+      <AccordionSection title="パラメーター設定" icon="⚙️">
+        <ParamsPanel params={draftParams} disabled={running} on:change={onParamsChange} />
+      </AccordionSection>
+
+      <AccordionSection title="概要メトリクス" icon="📊">
+        <StatBar current={currentMetrics} month={simState?.month ?? 0} />
+      </AccordionSection>
+
+      <AccordionSection title="チャート" icon="📈">
+        <div class="mobile-charts">
+          <div class="section-label">Price and Sales</div>
+          <PriceChart metrics={simState?.metrics ?? []} />
+          <div class="section-label" style="margin-top: 12px;">Vehicle Lifecycle</div>
+          <LifecycleChart metrics={simState?.metrics ?? []} />
+        </div>
+      </AccordionSection>
+
+      <AccordionSection title="イベントログ" icon="📡">
+        <EventLog events={allEvents} />
+      </AccordionSection>
+    </MobileDrawer>
+  {/if}
 </main>
 
 <style>
@@ -288,6 +346,11 @@
     grid-template-columns: 1fr 1fr;
     gap: 12px;
     margin-bottom: 6px;
+  }
+  .mobile-charts {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
   .section-label {
     font-size: 11px;

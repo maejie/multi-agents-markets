@@ -138,6 +138,58 @@
   let panStartY = 0;
   let worldStartX = 0;
   let worldStartY = 0;
+  let lastPinchDist = 0;
+
+  function getTouchDist(e: TouchEvent) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function onTouchStart(e: TouchEvent) {
+    if (e.touches.length === 1) {
+      hasUserAdjustedView = true;
+      isPanning = true;
+      panStartX = e.touches[0].clientX;
+      panStartY = e.touches[0].clientY;
+      worldStartX = worldContainer.x;
+      worldStartY = worldContainer.y;
+    } else if (e.touches.length === 2) {
+      isPanning = false;
+      lastPinchDist = getTouchDist(e);
+    }
+  }
+
+  function onTouchMove(e: TouchEvent) {
+    e.preventDefault();
+    if (e.touches.length === 1 && isPanning && worldContainer) {
+      worldContainer.x = worldStartX + (e.touches[0].clientX - panStartX);
+      worldContainer.y = worldStartY + (e.touches[0].clientY - panStartY);
+    } else if (e.touches.length === 2 && worldContainer && app) {
+      const newDist = getTouchDist(e);
+      if (lastPinchDist > 0) {
+        const oldScale = worldContainer.scale.x;
+        const nextScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldScale * (newDist / lastPinchDist)));
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const rect = hostEl.getBoundingClientRect();
+        const px = midX - rect.left;
+        const py = midY - rect.top;
+        const worldX = (px - worldContainer.x) / oldScale;
+        const worldY = (py - worldContainer.y) / oldScale;
+        worldContainer.scale.set(nextScale);
+        worldContainer.x = px - worldX * nextScale;
+        worldContainer.y = py - worldY * nextScale;
+        hasUserAdjustedView = true;
+      }
+      lastPinchDist = newDist;
+    }
+  }
+
+  function onTouchEnd(e: TouchEvent) {
+    if (e.touches.length < 2) lastPinchDist = 0;
+    if (e.touches.length === 0) isPanning = false;
+  }
 
   onMount(async () => {
     app = new Application();
@@ -165,6 +217,9 @@
     hostEl.addEventListener('mousedown', onPanStart);
     window.addEventListener('mousemove', onPanMove);
     window.addEventListener('mouseup', onPanEnd);
+    hostEl.addEventListener('touchstart', onTouchStart, { passive: true });
+    hostEl.addEventListener('touchmove', onTouchMove, { passive: false });
+    hostEl.addEventListener('touchend', onTouchEnd, { passive: true });
 
     app.ticker.add(onTick);
 
@@ -178,6 +233,9 @@
     hostEl?.removeEventListener('mousedown', onPanStart);
     window.removeEventListener('mousemove', onPanMove);
     window.removeEventListener('mouseup', onPanEnd);
+    hostEl?.removeEventListener('touchstart', onTouchStart);
+    hostEl?.removeEventListener('touchmove', onTouchMove);
+    hostEl?.removeEventListener('touchend', onTouchEnd);
     app?.ticker.remove(onTick);
     app?.destroy(false);
   });
