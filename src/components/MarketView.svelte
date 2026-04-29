@@ -32,9 +32,9 @@
     totalDuration: number;
   }
   const MAX_PARTICLES = 30;
-  const PARTICLE_TOTAL_MS = 1200;
-  const FADE_START = 0.85;   // particle starts fading at 85% of animation
-  const FADE_DURATION = 0.15; // fade lasts the remaining 15%
+  const PARTICLE_TOTAL_MS = 450;
+  const FADE_START = 0.8;    // particle starts fading at 80% of animation
+  const FADE_DURATION = 0.2; // fade lasts the remaining 20%
   let particles: Particle[] = [];
 
   function onTick(ticker: Ticker) {
@@ -87,18 +87,34 @@
   function spawnParticlesForEvents(events: SimEvent[]) {
     if (!layoutInfo) return;
     const { oemCenter, recyclerCenter, vehicleMarketCenter, agentPanelCenter, agentPositions } = layoutInfo;
+    const vmY = vehicleMarketCenter.y;
 
     for (const ev of events) {
       if (ev.eventType === 'NEW_CAR_DELIVERED') {
         const agentPos = ev.agentId ? (agentPositions.get(ev.agentId) ?? agentPanelCenter) : agentPanelCenter;
-        spawnParticle([oemCenter, vehicleMarketCenter, agentPos]);
+        spawnParticle([
+          oemCenter,
+          { x: oemCenter.x, y: vmY },
+          { x: agentPos.x, y: vmY },
+          agentPos,
+        ]);
       } else if (ev.eventType === 'USED_TRADE_EXECUTED') {
         const sellerPos = ev.sellerId ? (agentPositions.get(ev.sellerId) ?? agentPanelCenter) : agentPanelCenter;
         const buyerPos = ev.buyerId ? (agentPositions.get(ev.buyerId) ?? agentPanelCenter) : agentPanelCenter;
-        spawnParticle([sellerPos, vehicleMarketCenter, buyerPos]);
+        spawnParticle([
+          sellerPos,
+          { x: sellerPos.x, y: vmY },
+          { x: buyerPos.x, y: vmY },
+          buyerPos,
+        ]);
       } else if (ev.eventType === 'VEHICLE_DISPOSED_EOL' || ev.eventType === 'OWNER_EXIT_DISPOSAL') {
         const agentPos = ev.agentId ? (agentPositions.get(ev.agentId) ?? agentPanelCenter) : agentPanelCenter;
-        spawnParticle([agentPos, vehicleMarketCenter, recyclerCenter]);
+        spawnParticle([
+          agentPos,
+          { x: agentPos.x, y: vmY },
+          { x: recyclerCenter.x, y: vmY },
+          recyclerCenter,
+        ]);
       }
     }
   }
@@ -122,6 +138,58 @@
   let panStartY = 0;
   let worldStartX = 0;
   let worldStartY = 0;
+  let lastPinchDist = 0;
+
+  function getTouchDist(e: TouchEvent) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function onTouchStart(e: TouchEvent) {
+    if (e.touches.length === 1) {
+      hasUserAdjustedView = true;
+      isPanning = true;
+      panStartX = e.touches[0].clientX;
+      panStartY = e.touches[0].clientY;
+      worldStartX = worldContainer.x;
+      worldStartY = worldContainer.y;
+    } else if (e.touches.length === 2) {
+      isPanning = false;
+      lastPinchDist = getTouchDist(e);
+    }
+  }
+
+  function onTouchMove(e: TouchEvent) {
+    e.preventDefault();
+    if (e.touches.length === 1 && isPanning && worldContainer) {
+      worldContainer.x = worldStartX + (e.touches[0].clientX - panStartX);
+      worldContainer.y = worldStartY + (e.touches[0].clientY - panStartY);
+    } else if (e.touches.length === 2 && worldContainer && app) {
+      const newDist = getTouchDist(e);
+      if (lastPinchDist > 0) {
+        const oldScale = worldContainer.scale.x;
+        const nextScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, oldScale * (newDist / lastPinchDist)));
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const rect = hostEl.getBoundingClientRect();
+        const px = midX - rect.left;
+        const py = midY - rect.top;
+        const worldX = (px - worldContainer.x) / oldScale;
+        const worldY = (py - worldContainer.y) / oldScale;
+        worldContainer.scale.set(nextScale);
+        worldContainer.x = px - worldX * nextScale;
+        worldContainer.y = py - worldY * nextScale;
+        hasUserAdjustedView = true;
+      }
+      lastPinchDist = newDist;
+    }
+  }
+
+  function onTouchEnd(e: TouchEvent) {
+    if (e.touches.length < 2) lastPinchDist = 0;
+    if (e.touches.length === 0) isPanning = false;
+  }
 
   onMount(async () => {
     app = new Application();
@@ -149,6 +217,9 @@
     hostEl.addEventListener('mousedown', onPanStart);
     window.addEventListener('mousemove', onPanMove);
     window.addEventListener('mouseup', onPanEnd);
+    hostEl.addEventListener('touchstart', onTouchStart, { passive: true });
+    hostEl.addEventListener('touchmove', onTouchMove, { passive: false });
+    hostEl.addEventListener('touchend', onTouchEnd, { passive: true });
 
     app.ticker.add(onTick);
 
@@ -162,6 +233,9 @@
     hostEl?.removeEventListener('mousedown', onPanStart);
     window.removeEventListener('mousemove', onPanMove);
     window.removeEventListener('mouseup', onPanEnd);
+    hostEl?.removeEventListener('touchstart', onTouchStart);
+    hostEl?.removeEventListener('touchmove', onTouchMove);
+    hostEl?.removeEventListener('touchend', onTouchEnd);
     app?.ticker.remove(onTick);
     app?.destroy(false);
   });
@@ -301,6 +375,20 @@
       g.roundRect(0, 0, CELL, CELL, 4);
       g.fill(color);
       g.stroke({ color: borderColor, width: 1.5 });
+
+      // Blue light inside agents that own a vehicle
+      if (agent.vehicleId) {
+        const cx = CELL / 2;
+        const cy = CELL / 2;
+        g.circle(cx, cy, 7);
+        g.fill({ color: 0x1d4ed8, alpha: 0.3 });
+        g.circle(cx, cy, 4.5);
+        g.fill({ color: 0x3b82f6, alpha: 0.6 });
+        g.circle(cx, cy, 2.5);
+        g.fill({ color: 0x93c5fd, alpha: 0.9 });
+        g.circle(cx, cy, 1.2);
+        g.fill({ color: 0xffffff, alpha: 1 });
+      }
 
       // Age indicator - tiny dot at bottom if older
       if (agent.ageMonths > 400) {
