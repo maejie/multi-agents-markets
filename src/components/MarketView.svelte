@@ -32,9 +32,9 @@
     totalDuration: number;
   }
   const MAX_PARTICLES = 30;
-  const PARTICLE_TOTAL_MS = 1200;
-  const FADE_START = 0.85;   // particle starts fading at 85% of animation
-  const FADE_DURATION = 0.15; // fade lasts the remaining 15%
+  const PARTICLE_TOTAL_MS = 450;
+  const FADE_START = 0.8;    // particle starts fading at 80% of animation
+  const FADE_DURATION = 0.2; // fade lasts the remaining 20%
   let particles: Particle[] = [];
 
   function onTick(ticker: Ticker) {
@@ -87,18 +87,34 @@
   function spawnParticlesForEvents(events: SimEvent[]) {
     if (!layoutInfo) return;
     const { oemCenter, recyclerCenter, vehicleMarketCenter, agentPanelCenter, agentPositions } = layoutInfo;
+    const vmY = vehicleMarketCenter.y;
 
     for (const ev of events) {
       if (ev.eventType === 'NEW_CAR_DELIVERED') {
         const agentPos = ev.agentId ? (agentPositions.get(ev.agentId) ?? agentPanelCenter) : agentPanelCenter;
-        spawnParticle([oemCenter, vehicleMarketCenter, agentPos]);
+        spawnParticle([
+          oemCenter,
+          { x: oemCenter.x, y: vmY },
+          { x: agentPos.x, y: vmY },
+          agentPos,
+        ]);
       } else if (ev.eventType === 'USED_TRADE_EXECUTED') {
         const sellerPos = ev.sellerId ? (agentPositions.get(ev.sellerId) ?? agentPanelCenter) : agentPanelCenter;
         const buyerPos = ev.buyerId ? (agentPositions.get(ev.buyerId) ?? agentPanelCenter) : agentPanelCenter;
-        spawnParticle([sellerPos, vehicleMarketCenter, buyerPos]);
+        spawnParticle([
+          sellerPos,
+          { x: sellerPos.x, y: vmY },
+          { x: buyerPos.x, y: vmY },
+          buyerPos,
+        ]);
       } else if (ev.eventType === 'VEHICLE_DISPOSED_EOL' || ev.eventType === 'OWNER_EXIT_DISPOSAL') {
         const agentPos = ev.agentId ? (agentPositions.get(ev.agentId) ?? agentPanelCenter) : agentPanelCenter;
-        spawnParticle([agentPos, vehicleMarketCenter, recyclerCenter]);
+        spawnParticle([
+          agentPos,
+          { x: agentPos.x, y: vmY },
+          { x: recyclerCenter.x, y: vmY },
+          recyclerCenter,
+        ]);
       }
     }
   }
@@ -301,6 +317,20 @@
       g.roundRect(0, 0, CELL, CELL, 4);
       g.fill(color);
       g.stroke({ color: borderColor, width: 1.5 });
+
+      // Blue light inside agents that own a vehicle
+      if (agent.vehicleId) {
+        const cx = CELL / 2;
+        const cy = CELL / 2;
+        g.circle(cx, cy, 7);
+        g.fill({ color: 0x1d4ed8, alpha: 0.3 });
+        g.circle(cx, cy, 4.5);
+        g.fill({ color: 0x3b82f6, alpha: 0.6 });
+        g.circle(cx, cy, 2.5);
+        g.fill({ color: 0x93c5fd, alpha: 0.9 });
+        g.circle(cx, cy, 1.2);
+        g.fill({ color: 0xffffff, alpha: 1 });
+      }
 
       // Age indicator - tiny dot at bottom if older
       if (agent.ageMonths > 400) {
